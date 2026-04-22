@@ -8,13 +8,13 @@ KB_ROOT = Path("/srv/data/kb_projects")
 RE_CLAUSULA = re.compile(r"^\s*CL[ÁA]USULA\b", re.IGNORECASE)
 
 MAX_CHARS = 4000
+MIN_CHARS = 1500
 
 # ========================
 # DETECTAR INÍCIO DO CORPO
 # ========================
 
 def find_body_start(lines):
-
     re_cap1 = re.compile(r"^\s*CAP[IÍ]TULO\s+[I1]+\b", re.IGNORECASE)
     re_cl1 = re.compile(r"^\s*CL[ÁA]USULA\s+1\b", re.IGNORECASE)
 
@@ -22,10 +22,10 @@ def find_body_start(lines):
     cl_hits = []
 
     for i, line in enumerate(lines):
-        if re_cap1.match(line.strip()):
+        stripped = line.strip()
+        if re_cap1.match(stripped):
             cap_hits.append(i)
-
-        if re_cl1.match(line.strip()):
+        if re_cl1.match(stripped):
             cl_hits.append(i)
 
     if len(cl_hits) >= 2:
@@ -57,7 +57,6 @@ def split_clauses(lines):
 
     return chunks
 
-
 # ========================
 # FILTRO DE QUALIDADE
 # ========================
@@ -75,6 +74,42 @@ def is_valid_chunk(text):
 
     return True
 
+# ========================
+# MERGE DE CHUNKS PEQUENOS
+# ========================
+
+def merge_small_chunks(chunks):
+    if not chunks:
+        return []
+
+    merged = []
+    buffer = ""
+
+    for chunk in chunks:
+        chunk = chunk.strip()
+
+        if not buffer:
+            buffer = chunk
+            continue
+
+        # se buffer ainda é pequeno, junta com o próximo
+        if len(buffer) < MIN_CHARS:
+            candidate = buffer + "\n\n" + chunk
+
+            # se não estourar demais, mantém unido
+            if len(candidate) <= MAX_CHARS:
+                buffer = candidate
+            else:
+                merged.append(buffer.strip())
+                buffer = chunk
+        else:
+            merged.append(buffer.strip())
+            buffer = chunk
+
+    if buffer:
+        merged.append(buffer.strip())
+
+    return merged
 
 # ========================
 # SPLIT DE TAMANHO
@@ -88,7 +123,7 @@ def split_large_chunk(text):
     current = ""
 
     for line in text.split("\n"):
-        if len(current) + len(line) < MAX_CHARS:
+        if len(current) + len(line) + 1 <= MAX_CHARS:
             current += line + "\n"
         else:
             parts.append(current.strip())
@@ -98,7 +133,6 @@ def split_large_chunk(text):
         parts.append(current.strip())
 
     return parts
-
 
 # ========================
 # PROCESSAMENTO
@@ -113,19 +147,22 @@ def process_file(md_path: Path):
     text = md_path.read_text(encoding="utf-8", errors="ignore")
     lines = text.split("\n")
 
-
-    # 🔴 remover índice
+    # cortar índice / começar no corpo real
     start = find_body_start(lines)
     lines = lines[start:]
 
+    # split inicial por cláusula
     clause_chunks = split_clauses(lines)
 
+    # remover chunks ruins
+    valid_chunks = [c for c in clause_chunks if is_valid_chunk(c)]
+
+    # juntar chunks pequenos
+    merged_chunks = merge_small_chunks(valid_chunks)
+
+    # dividir apenas os grandes demais
     final_chunks = []
-
-    for chunk in clause_chunks:
-        if not is_valid_chunk(chunk):
-            continue
-
+    for chunk in merged_chunks:
         final_chunks.extend(split_large_chunk(chunk))
 
     chunk_files = []
@@ -145,16 +182,18 @@ def process_file(md_path: Path):
         "source": md_path.name,
         "chunks": len(chunk_files),
         "generated_at": datetime.now().isoformat(),
+        "min_chars_target": MIN_CHARS,
+        "max_chars_target": MAX_CHARS,
         "files": chunk_files
     }
 
     meta_path = chunk_dir / f"{base}.chunks.json"
-    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    meta_path.write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False),
+        encoding="utf-8"
+    )
 
     print(f"[OK] {md_path.name} → {len(chunk_files)} chunks")
-
-
-
 
 # ========================
 # RUNNER
@@ -169,7 +208,6 @@ def run():
 
         for file in rag_md.glob("*.clean.v4_3.md"):
             process_file(file)
-
 
 if __name__ == "__main__":
     run()
