@@ -14,16 +14,27 @@ MAX_CHARS = 4000
 # ========================
 
 def find_body_start(lines):
-    count = 0
+
+    re_cap1 = re.compile(r"^\s*CAP[IÍ]TULO\s+[I1]+\b", re.IGNORECASE)
+    re_cl1 = re.compile(r"^\s*CL[ÁA]USULA\s+1\b", re.IGNORECASE)
+
+    cap_hits = []
+    cl_hits = []
 
     for i, line in enumerate(lines):
-        if RE_CLAUSULA.match(line):
-            count += 1
-            if count == 2:
-                return i
+        if re_cap1.match(line.strip()):
+            cap_hits.append(i)
+
+        if re_cl1.match(line.strip()):
+            cl_hits.append(i)
+
+    if len(cl_hits) >= 2:
+        return cl_hits[1]
+
+    if len(cap_hits) >= 2:
+        return cap_hits[1]
 
     return 0
-
 
 # ========================
 # SPLIT PRINCIPAL
@@ -57,7 +68,9 @@ def is_valid_chunk(text):
     if len(lines) <= 1:
         return False
 
-    if len(text) < 100:
+    body = "\n".join(lines[1:]).strip()
+
+    if len(body) < 80:
         return False
 
     return True
@@ -100,6 +113,7 @@ def process_file(md_path: Path):
     text = md_path.read_text(encoding="utf-8", errors="ignore")
     lines = text.split("\n")
 
+
     # 🔴 remover índice
     start = find_body_start(lines)
     lines = lines[start:]
@@ -138,6 +152,8 @@ def process_file(md_path: Path):
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[OK] {md_path.name} → {len(chunk_files)} chunks")
+
+
 
 
 # ========================
